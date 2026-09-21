@@ -1,0 +1,31 @@
+# CI와 별도 실행: schedule/web + develop + 보호 브랜치 + CD_ENABLED=true.
+# 서버 기동/교체/롤백은 관리자 소유 deploy-war adapter를 연결한 뒤에만 실행합니다.
+deploy_development:
+  stage: deploy
+  interruptible: false
+  resource_group: development
+  dependencies: []
+  rules:
+    - if: '($CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "web") && $CI_COMMIT_BRANCH == "develop" && $CI_COMMIT_REF_PROTECTED == "true" && $CD_ENABLED == "true"'
+    # 그 외 모든 예외 상황 차단
+    - when: never
+  environment:
+    name: development
+  script:
+    - |
+      set -euo pipefail
+      [[ "${CD_ENABLED:-false}" == true && "${CI_COMMIT_BRANCH:-}" == develop && "${CI_COMMIT_REF_PROTECTED:-}" == true ]] || exit 1
+      case "${CI_PIPELINE_SOURCE:-}" in web|schedule) ;; *) exit 1 ;; esac
+      adapter=/usr/local/lib/ci/deploy-war
+      [[ -x "$adapter" && "$(stat -c %U "$adapter")" == root && ! -w "$adapter" && ! -w "$(dirname "$adapter")" ]] || {
+        echo 'ERROR: Administrator-owned deploy-war adapter is required.'; exit 1;
+      }
+    - !reference [.release_tasks, script]
+    - bash ./gradlew --no-daemon --no-configuration-cache --max-workers=1 -p .ci-release fetchRelease
+    - /usr/local/lib/ci/deploy-war development "$CI_PROJECT_DIR/deploy/application.war" "$DEPLOY_VERSION"
+  artifacts:
+    when: always
+    access: maintainer
+    expire_in: 90 days
+    paths:
+      - deploy/release.json

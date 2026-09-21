@@ -1,0 +1,49 @@
+// 기존 build.gradle/build.gradle.kts 수정 없이 CI에서만 적용합니다.
+import org.owasp.dependencycheck.gradle.DependencyCheckPlugin
+
+initscript {
+    repositories { gradlePluginPortal(); mavenCentral() }
+    dependencies {
+        classpath 'org.owasp.dependencycheck:org.owasp.dependencycheck.gradle.plugin:13.0.0'
+    }
+}
+
+gradle.beforeProject { p ->
+    if (p != p.rootProject) return
+    p.pluginManager.apply(DependencyCheckPlugin)
+    // 1.0.+(동적 버전) 및 1.0.0-SNAPSHOT(변동 버전) 의존성 사용을 금지
+    p.configurations.configureEach {
+        resolutionStrategy.failOnDynamicVersions()
+        resolutionStrategy.failOnChangingVersions()
+    }
+    p.afterEvaluate {
+        def dc = p.extensions.getByName('dependencyCheck')
+        // 취약점 점수(CVSS)가 7.0 이상(High / Critical 위험도)인 라이브러리가 발견되면 파이프라인 빌드를 강제로 실패시킵니다.
+        dc.failBuildOnCVSS = 7.0
+        // 보안 검사 중 내부 오류가 발생하면 무시하지 않고 즉시 빌드를 실패시킵니다.
+        dc.failOnError = true
+        // 보안 DB 업데이트를 수행하며, 검사를 스킵하지 않고 실행합니다.
+        dc.autoUpdate = true
+        dc.skip = false
+        dc.skipTestGroups = false
+        // 검사 결과 리포트를 HTML과 JSON 두 가지 포맷으로 reports/dependency-check 폴더에 생성합니다.
+        dc.formats = ['HTML', 'JSON']
+        dc.outputDirectory = p.file('reports/dependency-check')
+        // NVD 캐시 데이터베이스가 저장될 로컬 경로를 .dependency-check 폴더로 지정합니다 (CI 캐시용).
+        dc.data.directory = p.file('.dependency-check').absolutePath
+        // NVD 공식 API 대신 무료 GitHub 미러 서버에서 데이터를 가져옵니다.
+        dc.nvd.datafeedUrl = 'https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/nvdcve-{0}.json.gz'
+        // 추가 인증이 필요한 OSS Index 분석기를 끄지만, NVD 취약점 검사와 CISA KEV는 사용합니다. 검사 실패를 무시하지 않습니다.
+        dc.analyzers.ossIndex.enabled = false
+        // .NET DLL 등 어셈블리 파일 분석기를 비활성화하여 검사 속도를 향상시킵니다.
+        dc.analyzers.assemblyEnabled = false
+    }
+}
+
+// 전체 빌드 프로젝트 구성이 완료된 시점에 가동됩니다.
+gradle.projectsEvaluated {
+    // 단일 단독(Single Module) 프로젝트 전용, 멀티 모듈 프로젝트에서도 동작하게 하려면 수정 필요.
+    if (rootProject.allprojects.size() != 1) {
+        throw new GradleException('This template expects one root WAR module. Configure aggregate scanning for a multi-module project.')
+    }
+}

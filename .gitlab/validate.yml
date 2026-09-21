@@ -1,0 +1,43 @@
+branch_policy:
+  stage: validate
+  rules:
+    # MR이 생성되거나, 열려 있는 MR 브랜치에 새로운 커밋이 Push될 때 파이프라인을 실행
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "push"'
+    - when: never
+  script:
+    - |
+      set -eu
+      source_branch="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-${CI_COMMIT_BRANCH:-}}"
+      target_branch="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}"
+      printf 'Source: %s / Target: %s\n' "$source_branch" "$target_branch"
+
+      case "$source_branch" in
+        main|develop) ;;
+        *)
+          if ! printf '%s\n' "$source_branch" | grep -Eq '^feature/.+-[0-9]{8}(-[0-9]+)?$'; then
+            echo 'ERROR: Expected feature/<ID>-YYYYMMDD[-번호].'
+            exit 1
+          fi
+          ;;
+      esac
+
+      if [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ]; then
+        source_project="${CI_MERGE_REQUEST_SOURCE_PROJECT_ID:-}"
+        mr_project="${CI_MERGE_REQUEST_PROJECT_ID:-}"
+        if [ -z "$source_project" ] || [ -z "$mr_project" ]; then
+          echo 'ERROR: Required MR project variables are missing.'
+          exit 1
+        fi
+        if [ "$source_project" != "$mr_project" ]; then
+          echo 'ERROR: Same-project merge requests only.'
+          exit 1
+        fi
+        case "$source_branch:$target_branch" in
+          feature/*:develop|develop:main) ;;
+          *)
+            echo 'ERROR: Only feature/* -> develop and develop -> main are allowed.'
+            exit 1
+            ;;
+        esac
+      fi
+      echo 'Branch policy passed.'

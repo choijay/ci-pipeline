@@ -1,0 +1,55 @@
+import groovy.json.JsonSlurper
+
+plugins { id 'maven-publish' }
+
+def required = { String key ->
+    def value = System.getenv(key)
+    if (!value) throw new GradleException('Missing CI variable: ' + key)
+    value
+}
+if (required('CI_PIPELINE_SOURCE') != 'push' ||
+    required('CI_COMMIT_BRANCH') != 'develop' ||
+    required('CI_COMMIT_REF_PROTECTED') != 'true') {
+    throw new GradleException('Publication is limited to protected develop push pipelines.')
+}
+def appRoot = new File(required('CI_PROJECT_DIR'))
+def manifestFile = new File(appRoot, 'dist/release.json')
+if (!manifestFile.isFile()) throw new GradleException('Missing package_war artifact: dist/release.json')
+def metadata = new JsonSlurper().parse(manifestFile)
+def endpoint = new URI(required('NEXUS_REPOSITORY_URL'))
+if (endpoint.userInfo || endpoint.query || endpoint.fragment || !endpoint.host) {
+    throw new GradleException('Use a repository URL without embedded credentials, query or fragment.')
+}
+def loopbackHttp = endpoint.scheme == 'http' && endpoint.host in ['127.0.0.1', 'localhost', '::1']
+if (endpoint.scheme != 'https' && !loopbackHttp) {
+    throw new GradleException('HTTP is permitted only for same-VM loopback. Otherwise configure HTTPS.')
+}
+
+publishing {
+    publications {
+        war(MavenPublication) {
+            groupId = metadata.groupId
+            artifactId = metadata.artifactId
+            version = metadata.version
+            artifact(new File(appRoot, 'dist/application.war')) { extension = 'war' }
+            artifact(manifestFile) { classifier = 'manifest'; extension = 'json' }
+            pom {
+                packaging = 'war'
+                name = metadata.artifactId
+                description = 'Prebuilt WAR; source commit ' + metadata.commitSha
+                properties = [gitCommit: metadata.commitSha, gitlabPipelineId: metadata.pipelineId.toString()]
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = 'Nexus'
+            url = endpoint
+            allowInsecureProtocol = loopbackHttp
+            credentials {
+                username = required('NEXUS_USERNAME')
+                password = required('NEXUS_PASSWORD')
+            }
+        }
+    }
+}

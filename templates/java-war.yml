@@ -1,0 +1,55 @@
+# 앱 저장소에서 include:project로 참조하는 공통 진입점입니다.
+stages:
+  - validate
+  - secrets
+  - sonar
+  - security
+  - test
+  - package
+  - publish
+  - deploy
+
+default:
+  tags:
+    - lab-shell
+  interruptible: true
+
+variables:
+  GIT_DEPTH: "0"
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle-ci"
+  # GitLab과 Shell Runner가 같은 VM에 있는 현재 실습 기준입니다.
+  PIPELINE_GIT_BASE_URL: "http://127.0.0.1"
+  # Nexus가 Runner와 같은 VM에 있는 현재 실습 기준입니다.
+  NEXUS_REPOSITORY_URL: "http://127.0.0.1:8081/repository/war-releases"
+  MAVEN_GROUP_ID: "com.example"
+  MAVEN_ARTIFACT_ID: "$CI_PROJECT_NAME"
+  # 예약 배포는 서버용 adapter를 준비할 때까지 비활성화합니다.
+  CD_ENABLED: "false"
+  DEPLOY_VERSION: ""
+  DEPLOY_SHA256: ""
+
+workflow:
+  rules:
+    # MR이 생성되거나, 열려 있는 MR 브랜치에 새로운 커밋이 Push될 때 파이프라인을 실행
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # 실행 방식이 스케줄(Schedule)이거나 웹 UI의 Run Pipeline(Web) 버튼 클릭인 경우
+    # 대상 브랜치가 develop인 경우
+    # develop 브랜치가 Protected Branch로 설정되어 있는 경우
+    # CI/CD 변수 $CD_ENABLED 값이 true로 지정되어 있는 경우
+    - if: '($CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "web") && $CI_COMMIT_BRANCH == "develop" && $CI_COMMIT_REF_PROTECTED == "true" && $CD_ENABLED == "true"'
+    # develop -> main MR이 열려 있어도 develop Push CI는 반드시 실행합니다.
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main")'
+    # MR이 열려 있는 브랜치에 Push가 발생하면, MR 파이프라인이 실행되므로 Push CI는 실행하지 않는다(중복 실행 방지)
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    # MR이 없는 일반 브랜치 Push 시 실행(feature/* 에 push했을때)
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH'
+    # 그 외 모든 예외 상황 차단
+    - when: never
+
+include:
+  - local: '/.gitlab/gradle.yml'
+  - local: '/.gitlab/release.yml'
+  - local: '/.gitlab/validate.yml'
+  - local: '/.gitlab/ci.yml'
+  - local: '/.gitlab/cd.yml'

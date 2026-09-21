@@ -1,0 +1,37 @@
+// 하나의 실제 War/BootWar 출력만 dist/application.war로 전달합니다.
+import org.gradle.api.tasks.bundling.War
+
+gradle.beforeProject { p ->
+    p.configurations.configureEach {
+        resolutionStrategy.failOnDynamicVersions()
+        resolutionStrategy.failOnChangingVersions()
+    }
+}
+
+gradle.projectsEvaluated {
+    def p = rootProject
+    if (p.allprojects.size() != 1) {
+        throw new GradleException('This template expects one root WAR module.')
+    }
+    def task = p.tasks.findByName('bootWar')
+    if (task == null || !task.enabled) task = p.tasks.findByName('war')
+    if (!(task instanceof War) || !task.enabled) {
+        throw new GradleException('An enabled war or bootWar task is required. Add the war plugin to the application build.')
+    }
+    p.tasks.register('ciExportWar') {
+        dependsOn(task)
+        doLast {
+            def src = task.archiveFile.get().asFile
+            if (!src.isFile()) throw new GradleException('WAR output does not exist: ' + src)
+            p.delete(p.file('dist'))
+            p.copy {
+                from(src)
+                into(p.file('dist'))
+                rename { 'application.war' }
+            }
+            p.file('dist/version.txt').setText(p.version.toString(), 'UTF-8')
+            
+            println('Exported WAR from task: ' + task.path)
+        }
+    }
+}

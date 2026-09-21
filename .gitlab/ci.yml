@@ -1,0 +1,149 @@
+# 순차 stage를 사용합니다. needs: []를 추가하면 선행 검사 대기를 우회할 수 있습니다.
+.ci_checks:
+  rules:
+    # MR이 올려졌을 때 또는 develop 브랜치에 Push될 때만 실행
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
+    - when: never
+
+.gradle_job:
+  cache:
+    key: "gradle-$CI_PROJECT_ID-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .gradle-ci/wrapper/
+      - .gradle-ci/caches/
+    policy: pull-push
+  before_script:
+    - test -f gradlew
+    - java -version
+
+gitleaks:
+  extends: .ci_checks
+  stage: secrets
+  script:
+    - mkdir -p reports
+    - gitleaks version
+    # 체크아웃된 커밋까지의 전체 Git 이력 검사. 리포트와 로그의 비밀값은 가립니다.
+    - gitleaks git --no-banner --redact=100 --report-format json --report-path reports/gitleaks.json --exit-code 1 --log-opts=HEAD .
+  artifacts:
+    when: always
+    access: maintainer
+    expire_in: 7 days
+    paths:
+      - reports/gitleaks.json
+
+sonarqube_scan:
+  extends: .gradle_job
+  stage: sonar
+  dependencies: []
+  allow_failure: false
+
+  variables:
+    SONAR_USER_HOME: "$CI_PROJECT_DIR/.sonar"
+
+  cache:
+    paths:
+      - .gradle-ci/wrapper/
+      - .gradle-ci/caches/
+      - .sonar/cache/
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
+    - when: never
+
+  script:
+    - |
+      : "${SONAR_HOST_URL:?SONAR_HOST_URL is required}"
+      : "${SONAR_TOKEN:?SONAR_TOKEN is required}"
+      : "${SONAR_PROJECT_KEY:?SONAR_PROJECT_KEY is required}"
+
+      bash ./gradlew --no-daemon --no-configuration-cache --max-workers=1 \
+        classes testClasses sonar \
+        "-Dsonar.projectKey=$SONAR_PROJECT_KEY" \
+        -Dsonar.qualitygate.wait=true \
+        -Dsonar.qualitygate.timeout=300
+        
+dependency_check:
+  extends:
+    - .ci_checks
+    - .gradle_job
+  stage: security
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
+      when: on_success
+    - when: never
+  timeout: 2h
+  resource_group: dependency-check-db
+  cache:
+    key: "dependency-check-13-$CI_PROJECT_ID-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .gradle-ci/wrapper/
+      - .gradle-ci/caches/
+      - .dependency-check/
+    policy: pull-push
+  script:
+    - !reference [.pipeline_checkout, script]
+    - bash ./gradlew --no-daemon --no-configuration-cache --max-workers=1 -I "$PIPELINE_DIR/ci/gradle-security.init.gradle" dependencyCheckAnalyze
+  artifacts:
+    when: always
+    access: maintainer
+    expire_in: 7 days
+    paths:
+      - reports/dependency-check/
+
+unit_test:
+  extends:
+    - .ci_checks
+    - .gradle_job
+  stage: test
+  script:
+    - bash ./gradlew --no-daemon --no-configuration-cache --max-workers=1 clean test
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: build/test-results/test/*.xml
+    paths:
+      - build/reports/tests/
+
+package_war:
+  extends: .gradle_job
+  stage: package
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $CI_COMMIT_REF_PROTECTED == "true"'
+    - when: never
+  dependencies: []
+  script:
+    # 1. war 내보내기 실행
+    - !reference [.pipeline_checkout, script]
+    - bash ./gradlew --no-daemon --no-configuration-cache --max-workers=1 -I "$PIPELINE_DIR/ci/gradle-war.init.gradle" ciExportWar
+    # 2. 배포용 메타데이터 생성
+    - !reference [.release_tasks, script]
+    - bash ./gradlew --no-daemon --no-configuration-cache --max-workers=1 -p .ci-release createRelease
+  artifacts:
+    access: maintainer
+    expire_in: 30 days
+    paths:
+      - dist/application.war
+      - dist/release.json
+
+publish_nexus:
+  extends: .gradle_job
+  stage: publish
+  interruptible: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $CI_COMMIT_REF_PROTECTED == "true"'
+    - when: never
+  dependencies:
+    - package_war
+  script:
+    - !reference [.release_tasks, script]
+    - bash ./gradlew --no-daemon --no-configuration-cache --max-workers=1 -p .ci-release verifyLocal
+    # 이미 생성한 WAR만 업로드합니다. 앱을 재빌드하지 않습니다.
+    - !reference [.pipeline_checkout, script]
+    - bash ./gradlew --no-daemon --no-configuration-cache --max-workers=1 -p "$PIPELINE_DIR/ci/publish" publishWarPublicationToNexusRepository
+  artifacts:
+    access: maintainer
+    expire_in: 30 days
+    paths:
+      - dist/release.json

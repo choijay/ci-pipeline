@@ -1,0 +1,7 @@
+# 템플릿 저장소에서 앱 파이프라인을 실행하지 않습니다.
+workflow:
+  rules:
+    - when: never
+template_repository:
+  script:
+    - echo 'Template repository; consumed by ci-lab.'

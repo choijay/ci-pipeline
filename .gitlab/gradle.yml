@@ -1,0 +1,12 @@
+# Gradle 보조 파일이 필요한 Job에서만 공통 저장소를 checkout합니다.
+.pipeline_checkout:
+  script:
+    - |
+      set -euo pipefail
+      : "${PIPELINE_PROJECT:?PIPELINE_PROJECT is required}"
+      : "${CI_JOB_TOKEN:?CI_JOB_TOKEN is required}"
+      [[ "${PIPELINE_REF:-}" =~ ^[0-9a-f]{40}$ ]] || { echo 'PIPELINE_REF must be the include commit SHA' >&2; exit 1; }
+      PIPELINE_DIR=$(mktemp -d "$CI_PROJECT_DIR/.ci-pipeline.XXXXXX")
+      git -c "http.extraHeader=Authorization: Basic $(printf 'gitlab-ci-token:%s' "$CI_JOB_TOKEN" | base64 | tr -d '\n')" \
+        clone --no-checkout -- "${PIPELINE_GIT_BASE_URL%/}/${PIPELINE_PROJECT}.git" "$PIPELINE_DIR"
+      git -C "$PIPELINE_DIR" checkout --detach "$PIPELINE_REF"

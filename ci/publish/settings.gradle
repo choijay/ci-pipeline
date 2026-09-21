@@ -1,0 +1,2 @@
+// 앱의 settings.gradle과 분리하여 publication 단계에서 앱 Task를 실행하지 않습니다.
+rootProject.name = 'prebuilt-war-publisher'

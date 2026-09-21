@@ -1,0 +1,2 @@
+# Fixed operations for this sample only. No generic shell/service privilege.
+gitlab-runner ALL=(root) NOPASSWD: /usr/bin/systemctl restart counter-demo.service, /usr/bin/systemctl stop counter-demo.service, /usr/bin/systemctl reset-failed counter-demo.service

@@ -1,0 +1,34 @@
+[Unit]
+Description=Counter Demo - development lab
+After=network.target
+ConditionPathExists=/srv/counter-demo/current/application.war
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=counter-demo
+Group=counter-demo
+StateDirectory=counter-demo
+StateDirectoryMode=0750
+WorkingDirectory=/var/lib/counter-demo
+ExecStart=/usr/lib/jvm/java-17-openjdk-amd64/bin/java -Xms128m -Xmx512m -XX:+ExitOnOutOfMemoryError -jar /srv/counter-demo/current/application.war --server.address=0.0.0.0 --server.port=18080 --server.servlet.context-path=/ --server.shutdown=graceful --spring.lifecycle.timeout-per-shutdown-phase=5s
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+TimeoutStopSec=15
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/counter-demo
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

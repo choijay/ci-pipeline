@@ -1,0 +1,9 @@
+# 기존 파일이 있으면 이 항목만 병합하세요. Linux Runner 실행을 위한 LF 고정입니다.
+*.sh text eol=lf
+*.yml text eol=lf
+*.py text eol=lf
+*.gradle text eol=lf
+gradlew text eol=lf
+ops/counter-systemd-deploy/deploy-war text eol=lf
+*.service text eol=lf
+*.sudoers text eol=lf
